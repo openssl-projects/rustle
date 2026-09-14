@@ -65,6 +65,14 @@ pub type DigestSetCtxParamsFn =
 /// list [`DigestSetCtxParamsFn`] accepts.
 pub type DigestSettableCtxParamsFn =
     unsafe extern "C" fn(dctx: *mut ffi::c_void, provctx: *mut ffi::c_void) -> *const OSSL_PARAM;
+/// Signature of `OSSL_FUNC_digest_get_ctx_params` — read per-context
+/// parameters back out of a live context.
+pub type DigestGetCtxParamsFn =
+    unsafe extern "C" fn(dctx: *mut ffi::c_void, params: *mut OSSL_PARAM) -> ffi::c_int;
+/// Signature of `OSSL_FUNC_digest_gettable_ctx_params` — return the descriptor
+/// list [`DigestGetCtxParamsFn`] can fill.
+pub type DigestGettableCtxParamsFn =
+    unsafe extern "C" fn(dctx: *mut ffi::c_void, provctx: *mut ffi::c_void) -> *const OSSL_PARAM;
 
 /// Opaque handle to a provider instance, owned by the OpenSSL core.
 ///
@@ -166,8 +174,7 @@ impl OSSL_DISPATCH {
     pub const OSSL_FUNC_PROVIDER_RANDOM_BYTES: ffi::c_int = 1032;
 
     // Digest operation functions (`OSSL_FUNC_DIGEST_*`, IDs 1-15 in
-    // `<openssl/core_dispatch.h>`; the ctx-params and one-shot entries are
-    // omitted until needed).
+    // `<openssl/core_dispatch.h>`
 
     /// Allocate a new digest context.
     pub const OSSL_FUNC_DIGEST_NEWCTX: ffi::c_int = 1;
@@ -185,6 +192,8 @@ impl OSSL_DISPATCH {
     pub const OSSL_FUNC_DIGEST_GET_PARAMS: ffi::c_int = 8;
     /// Apply per-context parameters (e.g. `xoflen` for XOF digests).
     pub const OSSL_FUNC_DIGEST_SET_CTX_PARAMS: ffi::c_int = 9;
+    /// Read per-context parameters back out of a live context.
+    pub const OSSL_FUNC_DIGEST_GET_CTX_PARAMS: ffi::c_int = 10;
     /// Return the descriptor list [`get_params`] can fill.
     ///
     /// [`get_params`]: Self::OSSL_FUNC_DIGEST_GET_PARAMS
@@ -193,6 +202,10 @@ impl OSSL_DISPATCH {
     ///
     /// [`set_ctx_params`]: Self::OSSL_FUNC_DIGEST_SET_CTX_PARAMS
     pub const OSSL_FUNC_DIGEST_SETTABLE_CTX_PARAMS: ffi::c_int = 12;
+    /// Return the descriptor list [`get_ctx_params`] can fill.
+    ///
+    /// [`get_ctx_params`]: Self::OSSL_FUNC_DIGEST_GET_CTX_PARAMS
+    pub const OSSL_FUNC_DIGEST_GETTABLE_CTX_PARAMS: ffi::c_int = 13;
 
     // Operation IDs used by query_operation (core_dispatch.h).
 
@@ -312,6 +325,18 @@ impl OSSL_DISPATCH {
     #[must_use]
     pub(crate) const fn digest_settable_ctx_params(f: DigestSettableCtxParamsFn) -> Self {
         Self::erase(Self::OSSL_FUNC_DIGEST_SETTABLE_CTX_PARAMS, f as *const ())
+    }
+
+    /// Builds the `OSSL_FUNC_DIGEST_GET_CTX_PARAMS` entry.
+    #[must_use]
+    pub(crate) const fn digest_get_ctx_params(f: DigestGetCtxParamsFn) -> Self {
+        Self::erase(Self::OSSL_FUNC_DIGEST_GET_CTX_PARAMS, f as *const ())
+    }
+
+    /// Builds the `OSSL_FUNC_DIGEST_GETTABLE_CTX_PARAMS` entry.
+    #[must_use]
+    pub(crate) const fn digest_gettable_ctx_params(f: DigestGettableCtxParamsFn) -> Self {
+        Self::erase(Self::OSSL_FUNC_DIGEST_GETTABLE_CTX_PARAMS, f as *const ())
     }
 }
 

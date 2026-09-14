@@ -232,6 +232,99 @@ err:
 	return ret;
 }
 
+/*
+ * A context parameter this provider serves in both directions: the fixture
+ * pairs its getter with its setter, as upstream does for every digest
+ * context parameter it serves (SHAKE's xoflen/size, blake2's size).
+ */
+static int test_ctx_getters(void)
+{
+	EVP_MD_CTX *ctx = NULL;
+	const OSSL_PARAM *table, *entry;
+	int value = 42, readback = 0, ret = 0;
+	OSSL_PARAM set[] = { OSSL_PARAM_int("test-value", &value),
+			     OSSL_PARAM_END };
+	OSSL_PARAM get[] = { OSSL_PARAM_int("test-value", &readback),
+			     OSSL_PARAM_END };
+
+	if (!TEST_ptr(ctx = EVP_MD_CTX_new())
+	    || !TEST_ptr(table = EVP_MD_gettable_ctx_params(params_md))
+	    || !TEST_ptr(entry = OSSL_PARAM_locate_const(table, "test-value"))
+	    || !TEST_uint_eq(entry->data_type, OSSL_PARAM_INTEGER))
+		goto err;
+
+	/* The value set through INIT is the value read back. */
+	if (!TEST_true(EVP_DigestInit_ex2(ctx, params_md, set))
+	    || !TEST_ptr(EVP_MD_CTX_gettable_params(ctx))
+	    || !TEST_true(EVP_MD_CTX_get_params(ctx, get))
+	    || !TEST_int_eq(readback, 42)
+	    || !TEST_size_t_eq(get[0].return_size, sizeof(int)))
+		goto err;
+
+	/* And so is the value set through SET_CTX_PARAMS afterwards. */
+	value = 7;
+	readback = 0;
+	if (!TEST_true(EVP_MD_CTX_set_params(ctx, set))
+	    || !TEST_true(EVP_MD_CTX_get_params(ctx, get))
+	    || !TEST_int_eq(readback, 7))
+		goto err;
+	ret = 1;
+err:
+	EVP_MD_CTX_free(ctx);
+	return ret;
+}
+
+/*
+ * The bufferless query, an undescribed name, and a described name requested
+ * as the wrong type. The middle case is what upstream's SHAKE128 does with
+ * an unknown name alongside a known one: leave it alone and still succeed.
+ */
+static int test_ctx_getter_bounds(void)
+{
+	EVP_MD_CTX *ctx = NULL;
+	int value = 42, readback = 0, spare = 123, ret = 0;
+	size_t wrong_type = 0;
+	OSSL_PARAM set[] = { OSSL_PARAM_int("test-value", &value),
+			     OSSL_PARAM_END };
+	OSSL_PARAM query[] = { OSSL_PARAM_int("test-value", NULL),
+			       OSSL_PARAM_END };
+	OSSL_PARAM mixed[] = { OSSL_PARAM_int("test-value", &readback),
+			       OSSL_PARAM_int("no-such-param", &spare),
+			       OSSL_PARAM_END };
+	OSSL_PARAM mistyped[] = { OSSL_PARAM_size_t("test-value", &wrong_type),
+				  OSSL_PARAM_END };
+
+	if (!TEST_ptr(ctx = EVP_MD_CTX_new())
+	    || !TEST_true(EVP_DigestInit_ex2(ctx, params_md, set)))
+		goto err;
+
+	/* Null data is a size query, reporting the native integer width. */
+	query[0].data_size = 0;
+	if (!TEST_true(EVP_MD_CTX_get_params(ctx, query))
+	    || !TEST_size_t_eq(query[0].return_size, sizeof(int))
+	    || !TEST_ptr_null(query[0].data))
+		goto err;
+
+	/* A name the descriptor table does not list stays untouched: its
+	 * return_size keeps the OSSL_PARAM_UNMODIFIED the constructor set. */
+	if (!TEST_true(EVP_MD_CTX_get_params(ctx, mixed))
+	    || !TEST_int_eq(readback, 42) || !TEST_int_eq(spare, 123)
+	    || !TEST_true(OSSL_PARAM_modified(&mixed[0]))
+	    || !TEST_false(OSSL_PARAM_modified(&mixed[1])))
+		goto err;
+
+	/* A described name requested as the wrong type fails the whole call
+	 * without writing, as the integer helpers do elsewhere. */
+	if (!TEST_int_eq(EVP_MD_CTX_get_params(ctx, mistyped), 0)
+	    || !TEST_size_t_eq(wrong_type, 0)
+	    || !TEST_size_t_eq(mistyped[0].return_size, 0))
+		goto err;
+	ret = 1;
+err:
+	EVP_MD_CTX_free(ctx);
+	return ret;
+}
+
 int setup_tests(void)
 {
 	if (!bc_rust_load(test_argc > 1 ? test_argv[1] : NULL, &libctx, &prov))
@@ -251,6 +344,8 @@ int setup_tests(void)
 	ADD_ALL_TESTS(test_integer_buffer_bounds, 2);
 	ADD_ALL_TESTS(test_utf8_string, ARRAY_SIZE(string_cases));
 	ADD_TEST(test_ctx_setters);
+	ADD_TEST(test_ctx_getters);
+	ADD_TEST(test_ctx_getter_bounds);
 	return 1;
 }
 

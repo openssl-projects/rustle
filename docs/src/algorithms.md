@@ -31,8 +31,9 @@ for that hash. The table keeps all callbacks tied to that hash's context
 type; provider code cannot combine callbacks from different implementations.
 
 Method presence decides which optional callbacks each dispatch table contains.
-These fixed-length hashes have no configurable per-context state, so they do
-not register context setters. See [Digest Vtables](./design-vtable.md).
+These fixed-length hashes have no per-context state, so they register context
+parameters in neither direction — as the default provider's own fixed-length
+digests do not. See [Digest Vtables](./design-vtable.md).
 
 ## Operations not served
 

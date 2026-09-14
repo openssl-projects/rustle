@@ -101,9 +101,9 @@ Everything that has to cross the FFI boundary:
   justification, enforced by `clippy::undocumented_unsafe_blocks`.
 - **Parameter arrays.** `OSSL_PARAM` is a C struct of type-erased `void *`
   fields; `Params`/`ParamsMut` wrap the `END`-terminated arrays and the
-  `gettable_params!`/`settable_ctx_params!` macros generate the descriptor
-  table and the getter/setter from one list, so a descriptor can never drift
-  out of sync with its handler.
+  `gettable_params!`/`settable_ctx_params!`/`gettable_ctx_params!` macros
+  generate the descriptor table and the handler from one list, so a descriptor
+  can never drift out of sync with its handler.
 - **The unmangled entry point.** `provider_init!` expands to the one
   `unsafe extern "C"` symbol a provider inherently needs. The tokens live in
   `rustle`, so the macro can be invoked from a crate that forbids unsafe.
@@ -120,8 +120,9 @@ access to its data buffers. Parameter lookup and dispatch then use the
 borrowed views through safe methods.
 
 Mutable lookup returns a `ParamMut<'_>` cell, and `Digest::get_param` takes
-`&mut ParamMut<'_>`. The getter macro uses that same signature, so existing
-`|p| p.set_size_t(...)` handlers keep their shape. The wrapper exposes the
+`&mut ParamMut<'_>`. Both getter macros use that same signature, so existing
+`|p| p.set_size_t(...)` handlers keep their shape; the context getter takes
+`&self` alongside it, since reading a context parameter never mutates one. The wrapper exposes the
 parameter name, type checks, and setters; its raw `&mut OSSL_PARAM` stays
 private. It provides no mutable dereference or conversion back to the raw
 cell. Returning the raw reference would allow `mem::replace` to extract an
@@ -160,9 +161,9 @@ arrays looking for the terminator; an unterminated one would read beyond
 the table. The private construction path preserves that check together with
 the requirement that every callback uses the same context type.
 
-Parameter descriptors use a validated `ParamTable`. Both
-`Digest::gettable_params` and `Digest::settable_ctx_params` return this type,
-so a hand-written implementation cannot return an arbitrary slice to the
+Parameter descriptors use a validated `ParamTable`. `Digest::gettable_params`,
+`Digest::settable_ctx_params` and `Digest::gettable_ctx_params` all return this
+type, so a hand-written implementation cannot return an arbitrary slice to the
 FFI callbacks. Its private backing slice is static; `ParamTable::new`
 returns `None` for an empty slice or a table without a final `OSSL_PARAM::END`.
 An empty descriptor table contains only `END`. Duplicate names retain

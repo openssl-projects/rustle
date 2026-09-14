@@ -131,11 +131,15 @@ err:
 }
 
 /*
- * These SHA2/SHA3 digests have no configurable per-context state and must not
- * advertise setters; an attempt to change their output size must fail
- * rather than succeed without changing anything.
+ * These SHA2/SHA3 digests have no configurable per-context state, so they
+ * must advertise neither direction: an attempt to change their output size
+ * must fail rather than succeed without changing anything, and there must be
+ * nothing to read back per context either. The default provider's own
+ * fixed-length digests behave the same way -- both accessors come back null
+ * and EVP_MD_CTX_get_params returns failure -- while its SHAKE128, whose
+ * output length genuinely varies, serves both.
  */
-static int test_fixed_digest_has_no_ctx_setters(int idx)
+static int test_fixed_digest_has_no_ctx_params(int idx)
 {
 	const char *alg = digest_kats[idx].alg;
 	size_t size = 100;
@@ -154,11 +158,17 @@ static int test_fixed_digest_has_no_ctx_setters(int idx)
 	}
 
 	ret &= TEST_ptr_null(EVP_MD_settable_ctx_params(md));
+	ret &= TEST_ptr_null(EVP_MD_gettable_ctx_params(md));
 	if (!TEST_true(EVP_DigestInit_ex2(ctx, md, NULL))) {
 		ret = 0;
 		goto err;
 	}
+	ret &= TEST_ptr_null(EVP_MD_CTX_settable_params(ctx));
+	ret &= TEST_ptr_null(EVP_MD_CTX_gettable_params(ctx));
 	ret &= TEST_int_eq(EVP_MD_CTX_set_params(ctx, params), 0);
+	ret &= TEST_int_eq(EVP_MD_CTX_get_params(ctx, params), 0);
+	/* Neither rejected call touched the caller's buffer. */
+	ret &= TEST_size_t_eq(size, 100);
 
 err:
 	EVP_MD_CTX_free(ctx);
@@ -253,7 +263,7 @@ int setup_tests(void)
 	ADD_TEST(test_digest_aliases);
 	ADD_ALL_TESTS(test_digest, ARRAY_SIZE(digest_kats));
 	ADD_ALL_TESTS(test_digest_streaming, ARRAY_SIZE(digest_kats));
-	ADD_ALL_TESTS(test_fixed_digest_has_no_ctx_setters,
+	ADD_ALL_TESTS(test_fixed_digest_has_no_ctx_params,
 		      ARRAY_SIZE(digest_kats));
 	ADD_ALL_TESTS(test_digest_copy, ARRAY_SIZE(digest_kats));
 

@@ -188,6 +188,20 @@ pub trait Digest: Sized + 'static {
         false
     }
 
+    /// Optional descriptor table, paired with `get_ctx_param`.
+    ///
+    /// Only genuinely per-context state belongs here; a value fixed for the
+    /// algorithm belongs in `gettable_params` instead.
+    #[must_use]
+    fn gettable_ctx_params() -> ParamTable {
+        crate::param_table! {}
+    }
+
+    /// Optional: Fill one described context parameter. Unknown names are not dispatched.
+    fn get_ctx_param(&self, _name: &ffi::CStr, _param: &mut ParamMut<'_>) -> bool {
+        false
+    }
+
     /// Apply supported parameters during initialization or a setter callback.
     ///
     /// A null array succeeds. Unrecognized names are ignored, preserving the
@@ -224,10 +238,18 @@ impl<D: Digest> DigestAlgorithm<D> {
     // Const slice indexing is not available on the minimum toolchain. Both
     // indices are bounded by the candidate count and the extra END slot.
     #[allow(clippy::indexing_slicing)]
-    const ENTRIES: [OSSL_DISPATCH; 11] = {
+    const ENTRIES: [OSSL_DISPATCH; 13] = {
         assert!(
             D::HAS_SET_CTX_PARAM == D::HAS_SETTABLE_CTX_PARAMS,
             "context setter and descriptor methods must be implemented together"
+        );
+        assert!(
+            D::HAS_GET_CTX_PARAM == D::HAS_GETTABLE_CTX_PARAMS,
+            "context getter and descriptor methods must be implemented together"
+        );
+        assert!(
+            !D::HAS_GET_CTX_PARAM || D::HAS_SET_CTX_PARAM,
+            "a gettable context parameter must be settable too"
         );
         let candidates = [
             Some(OSSL_DISPATCH::digest_newctx(Self::newctx)),
@@ -254,8 +276,20 @@ impl<D: Digest> DigestAlgorithm<D> {
             } else {
                 None
             },
+            if D::HAS_GET_CTX_PARAM {
+                Some(OSSL_DISPATCH::digest_get_ctx_params(Self::get_ctx_params))
+            } else {
+                None
+            },
+            if D::HAS_GETTABLE_CTX_PARAMS {
+                Some(OSSL_DISPATCH::digest_gettable_ctx_params(
+                    Self::gettable_ctx_params,
+                ))
+            } else {
+                None
+            },
         ];
-        let mut entries = [OSSL_DISPATCH::END; 11];
+        let mut entries = [OSSL_DISPATCH::END; 13];
         let mut source = 0;
         let mut dest = 0;
         // Each candidate contributes at most one entry, leaving room for END.
@@ -406,5 +440,40 @@ impl<D: Digest> DigestAlgorithm<D> {
         _provctx: *mut ffi::c_void,
     ) -> *const OSSL_PARAM {
         D::settable_ctx_params().as_ptr()
+    }
+
+    unsafe extern "C" fn get_ctx_params(
+        dctx: *mut ffi::c_void,
+        params: *mut OSSL_PARAM,
+    ) -> ffi::c_int {
+        if dctx.is_null() || !D::HAS_GET_CTX_PARAM {
+            return 0;
+        }
+        // SAFETY: the core lends a null or END-terminated array with writable
+        // typed output storage and valid keys, exclusively for this call.
+        let Some(mut params) = (unsafe { ParamsMut::from_ptr(params) }) else {
+            return 1;
+        };
+        // SAFETY: OpenSSL lends a live D created by this table's allocator;
+        // reading context parameters needs only shared access.
+        let ctx = unsafe { &*dctx.cast::<D>() };
+        for descriptor in D::gettable_ctx_params().iter() {
+            let Some(name) = descriptor.key() else {
+                break;
+            };
+            if let Some(mut param) = params.locate(name)
+                && !ctx.get_ctx_param(name, &mut param)
+            {
+                return 0;
+            }
+        }
+        1
+    }
+
+    unsafe extern "C" fn gettable_ctx_params(
+        _dctx: *mut ffi::c_void,
+        _provctx: *mut ffi::c_void,
+    ) -> *const OSSL_PARAM {
+        D::gettable_ctx_params().as_ptr()
     }
 }

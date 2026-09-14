@@ -27,11 +27,30 @@ impl Digest for MyDigest {
 ```
 
 The streaming core and algorithm parameter methods are required. Duplication
-and context setters are optional. `dupctx` is registered only when the
+and context parameters are optional. `dupctx` is registered only when the
 implementation supplies it; the trait does not require `Clone` or `Default`.
-Context setter and descriptor methods must be implemented together, checked
-when the dispatch constant is evaluated. The parameter macro generates both
-methods from one declaration; omitting it omits both callbacks.
+A context accessor and its descriptor method must be implemented together,
+checked when the dispatch constant is evaluated. The parameter macros generate
+both methods from one declaration; omitting one omits both its callbacks.
+
+## Context parameters come in pairs
+
+A context parameter exists for state that genuinely varies between contexts of
+the same algorithm. A value fixed for the algorithm belongs in
+`gettable_params!` and nowhere else — serving it per context is API surface
+that upstream does not have.
+
+Where a name is per-context, the directions are not independent. Upstream
+digests that serve a context getter always serve the matching setter as well:
+SHAKE and cSHAKE's `xoflen` and `size`, blake2's `size`, ML-DSA-mu's context
+parameters. The reverse is not required — `SHA-1`'s `ssl3-ms` and MDC2's
+`pad-type` are write-only configuration with nothing to read back. So
+`gettable_ctx_params!` without `settable_ctx_params!` fails when the dispatch
+constant is evaluated; the other order is allowed.
+
+Verify any claim about what upstream registers by fetching the algorithm and
+calling `EVP_MD_gettable_ctx_params`/`EVP_MD_settable_ctx_params` on it, not by
+reading upstream's sources.
 
 Initialization belongs to the implementation. The adapter does not replace
 the context with a default value. Implementations that accept context
@@ -85,15 +104,16 @@ OpenSSL error-stack entry.
 
 `BcDigest<H>` implements the trait once for all eight registered SHA2 and
 SHA3 hashes. It uses explicit construction, reset, and duplication, and
-finalizes through `write_with`. These hashes have no configurable
-per-context state, so their tables omit context setters. This matches the
-default provider's fixed-length digest interface.
+finalizes through `write_with`. These hashes have no per-context state, so
+their tables omit context parameters in both directions. This matches the
+default provider's fixed-length digest interface, whose
+`EVP_MD_gettable_ctx_params` and `EVP_MD_settable_ctx_params` are both null.
 
 ## Current scope
 
 The adapter supports the streaming core, algorithm parameters, duplication,
-and static context setter descriptors. It does not yet expose one-shot
-callbacks, context getters, squeeze, copyctx, or serialization. Those
+and static context parameter descriptors in both directions. It does not yet
+expose one-shot callbacks, squeeze, copyctx, or serialization. Those
 operations require safe signatures and audited adapters, while reusing the
 same method-presence detection. Dynamic descriptor selection and
 one-shot-only implementations are also outside the current interface.

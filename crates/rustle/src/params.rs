@@ -79,6 +79,26 @@ impl OSSL_PARAM {
         }
     }
 
+    /// Builds a live cell over caller-owned storage.
+    ///
+    /// Test-only: real cells always arrive from the OpenSSL core, so the
+    /// adapters can be driven without one.
+    #[cfg(test)]
+    pub(crate) const fn cell(
+        key: &'static ffi::CStr,
+        data_type: ffi::c_uint,
+        data: *mut ffi::c_void,
+        data_size: usize,
+    ) -> Self {
+        Self {
+            key: key.as_ptr(),
+            data_type,
+            data,
+            data_size,
+            return_size: 0,
+        }
+    }
+
     /// Returns `true` for the end-of-array terminator (null `key`).
     const fn is_end(&self) -> bool {
         self.key.is_null()
@@ -667,6 +687,88 @@ macro_rules! settable_ctx_params {
                     let $this = &mut *self;
                     let $p = &*param;
                     return $apply;
+                }
+            )*
+            false
+        }
+    };
+}
+
+/// Implements [`Digest`](crate::digest::Digest)'s context getter and its table.
+///
+/// Each entry binds `this` to `&Self` and `p` to `&mut ParamMut<'_>`, returning
+/// `bool`. Unlisted names return `false`.
+///
+/// Serve a name here only when its value genuinely varies per context, and
+/// only alongside [`settable_ctx_params!`](crate::settable_ctx_params) for the
+/// same name: upstream digests register a context getter only with a matching
+/// setter, and the dispatch constant rejects a getter without one. A value
+/// fixed for the algorithm belongs in
+/// [`gettable_params!`](crate::gettable_params) instead.
+///
+/// ```
+/// use rustle::digest::{Digest, Output, Result};
+/// use rustle::params::Params;
+///
+/// struct MyHash {
+///     rounds: usize,
+/// }
+///
+/// #[rustle::vtable]
+/// impl Digest for MyHash {
+///     fn newctx() -> Result<Self> { Ok(Self { rounds: 1 }) }
+///     fn init(&mut self, params: Option<Params<'_>>) -> Result {
+///         self.rounds = 1;
+///         self.apply_ctx_params(params)
+///     }
+///
+///     rustle::gettable_params! {
+///         c"blocksize": UNSIGNED_INTEGER => |p| p.set_size_t(64),
+///         c"size":      UNSIGNED_INTEGER => |p| p.set_size_t(32),
+///     }
+///
+///     rustle::settable_ctx_params! {
+///         c"rounds": UNSIGNED_INTEGER => |this, p| match p.get_size_t() {
+///             Some(n) => {
+///                 this.rounds = n;
+///                 true
+///             }
+///             None => false,
+///         },
+///     }
+///
+///     rustle::gettable_ctx_params! {
+///         c"rounds": UNSIGNED_INTEGER => |this, p| p.set_size_t(this.rounds),
+///     }
+///
+///     fn update(&mut self, _data: &[u8]) -> Result { Ok(()) }
+///     fn finalize(&mut self, out: &mut Output<'_>) -> Result {
+///         out.write(&[0; 32])
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! gettable_ctx_params {
+    (@vtable $($entries:tt)*) => {
+        const HAS_GETTABLE_CTX_PARAMS: bool = true;
+        const HAS_GET_CTX_PARAM: bool = true;
+        $crate::gettable_ctx_params! { $($entries)* }
+    };
+    ($($name:literal : $ty:ident => |$this:ident, $p:ident| $fill:expr),* $(,)?) => {
+        fn gettable_ctx_params() -> $crate::params::ParamTable {
+            $crate::param_table! { $($name : $ty),* }
+        }
+
+        fn get_ctx_param(
+            &self,
+            name: &::core::ffi::CStr,
+            param: &mut $crate::params::ParamMut<'_>,
+        ) -> bool {
+            $(
+                if name == $name {
+                    let $this = &*self;
+                    let $p = &mut *param;
+                    return $fill;
                 }
             )*
             false

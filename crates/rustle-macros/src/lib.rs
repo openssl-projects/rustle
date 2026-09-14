@@ -71,6 +71,7 @@ fn expand(item: Item) -> syn::Result<proc_macro2::TokenStream> {
                             invocation.mac.path.segments.last().is_some_and(|segment| {
                                 segment.ident == "gettable_params"
                                     || segment.ident == "settable_ctx_params"
+                                    || segment.ident == "gettable_ctx_params"
                             });
                         if !supported {
                             return Err(Error::new_spanned(

@@ -38,6 +38,12 @@ impl Digest for TestDigest {
         },
     }
 
+    // Paired with the setter above, as upstream pairs a digest's context
+    // getter with its setter.
+    rustle::gettable_ctx_params! {
+        c"test-value": INTEGER => |this, p| p.set_int(this.0.into()),
+    }
+
     fn update(&mut self, _data: &[u8]) -> Result {
         Ok(())
     }
