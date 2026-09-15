@@ -1,125 +1,81 @@
-# Digest Vtables
+# Vtable
 
-The public `rustle::digest` API follows the Linux kernel's `#[vtable]`
-approach: an attribute records which trait methods an implementation supplies,
-and the adapter uses that information to construct the C dispatch table.
-Optional OpenSSL functions stay ordinary methods on one digest trait.
+A vtable tells OpenSSL which callbacks an implementation provides.
+`#[rustle::vtable]` connects the methods written by a provider author to the
+callbacks advertised to OpenSSL.
 
-## Method presence controls registration
+## Method presence
 
-```rust,ignore
-use rustle::digest::{Digest, DigestAlgorithm, Output, Result};
-use rustle::params::Params;
+The attribute is applied to a trait and its implementations. It records which
+methods an implementation explicitly supplies. An omitted optional method
+keeps its Rust default but is not advertised as an OpenSSL callback.
 
-#[rustle::vtable]
-impl Digest for MyDigest {
-    fn newctx() -> Result<Self> { /* construct owned state */ }
-    fn init(&mut self, params: Option<Params<'_>>) -> Result { /* reset */ }
-    fn update(&mut self, input: &[u8]) -> Result { /* absorb */ }
-    fn finalize(&mut self, out: &mut Output<'_>) -> Result { /* write */ }
+This distinction matters: having a callable default does not mean an
+implementation supports the operation. Recording presence keeps the advertised
+capabilities aligned with the methods the author chose to implement.
 
-    rustle::gettable_params! {
-        // Algorithm parameter descriptors and handlers.
-    }
+Consider context duplication. One implementation supplies `dupctx`; another
+leaves the default method in place. Both satisfy the Rust trait, but only the
+first should advertise duplication to OpenSSL. Registering the second would
+make an unsupported operation appear available until an application tried
+to use it.
 
-    fn dupctx(&self) -> Result<Self> { /* duplicate state */ }
-}
-```
+The attribute expresses that distinction through generated presence metadata:
 
-The streaming core and algorithm parameter methods are required. Duplication
-and context parameters are optional. `dupctx` is registered only when the
-implementation supplies it; the trait does not require `Clone` or `Default`.
-A context accessor and its descriptor method must be implemented together,
-checked when the dispatch constant is evaluated. The parameter macros generate
-both methods from one declaration; omitting one omits both its callbacks.
+| Implementation choice | Presence metadata | Optional callback |
+|-----------------------|-------------------|-------------------|
+| Defines `dupctx` | `HAS_DUPCTX = true` | Included |
+| Omits `dupctx` | `HAS_DUPCTX = false` | Omitted |
 
-## Context parameters come in pairs
+Authors implement methods rather than maintaining a second list of capability
+flags. The attribute rejects handwritten overrides of its presence metadata
+and adds a required marker to catch implementations that forget the attribute.
+Required trait methods remain subject to ordinary Rust trait checking.
 
-A context parameter exists for state that genuinely varies between contexts of
-the same algorithm. A value fixed for the algorithm belongs in
-`gettable_params!` and nowhere else — serving it per context is API surface
-that upstream does not have.
+## Conditional and generated methods
 
-Where a name is per-context, the directions are not independent. Upstream
-digests that serve a context getter always serve the matching setter as well:
-SHAKE and cSHAKE's `xoflen` and `size`, blake2's `size`, ML-DSA-mu's context
-parameters. The reverse is not required — `SHA-1`'s `ssl3-ms` and MDC2's
-`pad-type` are write-only configuration with nothing to read back. So
-`gettable_ctx_params!` without `settable_ctx_params!` fails when the dispatch
-constant is evaluated; the other order is allowed.
+Conditional methods participate only when enabled. Rustle's parameter macros
+cooperate with the attribute so their generated methods are recognized too.
+Other macros must expose their methods through a complete attributed
+implementation rather than hide them inside it.
 
-Verify any claim about what upstream registers by fetching the algorithm and
-calling `EVP_MD_gettable_ctx_params`/`EVP_MD_settable_ctx_params` on it, not by
-reading upstream's sources.
+The reason is macro expansion order: the attribute sees a nested macro
+invocation before that macro has produced its methods. Rustle's parameter
+macros explicitly cooperate by producing matching presence metadata. Rejecting
+other nested implementation macros avoids silently omitting callbacks that
+an author expected to register.
 
-Initialization belongs to the implementation. The adapter does not replace
-the context with a default value. Implementations that accept context
-parameters can call `self.apply_ctx_params(params)` after resetting their
-state. A null array means no parameters. The helper preserves first-match
-lookup and ignores names that the descriptor table does not list.
+Configuration attributes follow the methods' metadata. If a conditional
+method is disabled, its presence override is disabled too. The advertised
+capabilities therefore describe the implementation that was actually built.
 
-The attribute generates `HAS_*` constants and a required marker that catches
-forgotten implementation attributes. Direct method declarations and their
-presence constants have matching conditional-compilation attributes. The
-parameter macros cooperate by generating their own constants alongside the
-methods: an outer attribute cannot see the expansion of a nested macro.
-Other implementation-item macros are rejected rather than silently omitted;
-a macro can instead generate an entire attributed implementation. Handwritten
-presence overrides are rejected by the attribute.
+## Dispatch construction
 
-## Keep the unsafe boundary inside rustle
+Rustle builds the OpenSSL dispatch table at compile time. Required callbacks
+are always present; optional callbacks follow the recorded method presence.
+The table is terminated for OpenSSL's traversal and keeps every callback tied
+to the same context type.
 
-The attribute generates safe Rust metadata, not C wrappers. The generic
-adapters remain in rustle and all callbacks in a table share the same context
-type. They return the opaque `DigestFunctions` type; raw dispatch fields and
-callback constructors remain inaccessible to provider authors.
+OpenSSL identifies callbacks by operation-specific function IDs. The table
+associates those IDs with rustle's adapters for the selected implementation.
+For example, `HAS_DUPCTX` controls whether the duplication entry is included.
+The presence metadata chooses the entry; it does not change the adapter's
+signature or create a different context type.
 
-The builder packs present entries into a static array, followed by `END`.
-An absent optional callback cannot leave an early terminator that hides later
-callbacks. The backing array has spare terminators after its used portion;
-OpenSSL stops at the first one. No runtime allocation builds the table.
+Absent callbacks are omitted rather than represented by holes: an early
+terminator would hide every entry after it from OpenSSL. The resulting table
+is exposed as a complete `DigestFunctions` value so provider code cannot mix
+callbacks from unrelated implementations.
 
-Metadata controls registration but is not a memory-safety proof. Optional
-methods retain safe failure defaults. Errors become C failure; they do not
-panic or unwind into OpenSSL. Rustle allocates contexts with the C allocator
-and supplies destruction automatically.
+The builder checks relationships between callbacks, such as operations that
+must be supplied together. The attribute records presence; the operation's
+builder decides what constitutes a valid combination.
 
-## Output and errors
+This separates two questions: **was the method implemented?** and **does this
+set of methods form a supported interface?** Presence detection answers the
+first uniformly, while each operation's builder applies its own rules for
+the second. The same mechanism can therefore serve interfaces with different
+requirements.
 
-`Output` borrows potentially uninitialized storage and tracks successful
-writes. `write` copies bytes without reading the destination. `write_with`
-checks space before invoking a callback and zero-initializes that region
-before lending it as `&mut [u8]`. This lets existing safe crypto APIs write
-into C buffers without assuming those buffers were initialized. Its cost is
-one initialization pass over the requested output region.
-
-Only successful writes advance the reported length. Finalization returns that
-length through OpenSSL's output slot. There is no fixed digest-length
-assumption in the adapter; the implementation chooses how much to write.
-Errors distinguish unsupported operations, insufficient output space, and
-invalid parameters. The adapter currently reports C failure without adding an
-OpenSSL error-stack entry.
-
-## bc-rust implementation
-
-`BcDigest<H>` implements the trait once for all eight registered SHA2 and
-SHA3 hashes. It uses explicit construction, reset, and duplication, and
-finalizes through `write_with`. These hashes have no per-context state, so
-their tables omit context parameters in both directions. This matches the
-default provider's fixed-length digest interface, whose
-`EVP_MD_gettable_ctx_params` and `EVP_MD_settable_ctx_params` are both null.
-
-## Current scope
-
-The adapter supports the streaming core, algorithm parameters, duplication,
-and static context parameter descriptors in both directions. It does not yet
-expose one-shot callbacks, squeeze, copyctx, or serialization. Those
-operations require safe signatures and audited adapters, while reusing the
-same method-presence detection. Dynamic descriptor selection and
-one-shot-only implementations are also outside the current interface.
-
-`rustle-macros` runs on the host, including for cross-compilation. Its parser
-dependencies are build tooling and do not become runtime dependencies of the
-`no_std` provider ABI layer. The implementation is independent of the
-kernel source; the shared idea is described in the
-[kernel vtable documentation](https://www.kernel.org/doc/rustdoc/latest/macros/attr.vtable.html).
+This mechanism selects callbacks, rather than implementing them. FFI handling
+remains in rustle's adapters. It is separate from Rust's trait-object vtables.

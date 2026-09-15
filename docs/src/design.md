@@ -1,11 +1,11 @@
 # Design
 
-Four decisions shape the workspace, each with a chapter of its own:
+The following decisions shape the workspace:
 
 - [The Crate Split](./design-split.md) — why the FFI layer and the crypto
   live in separate crates, and what a provider author actually writes.
-- [Digest Vtables](./design-vtable.md) — how optional trait methods determine
-  which OpenSSL callbacks enter a digest dispatch table.
+- [Vtable](./design-vtable.md) — how method-presence metadata builds
+  the OpenSSL dispatch table.
 - [Context Memory](./design-memory.md) — why operation contexts go on the
   host process's C heap instead of into a `Box`, and what can and cannot be
   promised about scrubbing them.
