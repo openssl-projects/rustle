@@ -18,8 +18,8 @@ static OSSL_PROVIDER *prov;
 /* ------------------------------------------------------------------ */
 
 /*
- * FIPS 180-4 (SHA2) and FIPS 202 (SHA3) digests of "abc", with the
- * digest and block lengths each algorithm should report.
+ * FIPS 180-4 (SHA2), FIPS 202 (SHA3), and GB/T 32905-2016 (SM3) digests
+ * of "abc", with the digest and block lengths each algorithm should report.
  */
 struct digest_kat {
 	const char *alg;
@@ -58,6 +58,9 @@ static const struct digest_kat digest_kats[] = {
 	  "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d02"
 	  "40d2712e10e116e9192af3c91a7ec57647e3934057340b4cf408d5a5"
 	  "6592f8274eec53f0" },
+	{ "SM3", 32, 64,
+	  "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b"
+	  "8f4ba8e0" },
 };
 
 /* ------------------------------------------------------------------ */
@@ -138,7 +141,7 @@ err:
 }
 
 /*
- * These SHA2/SHA3 digests have no configurable per-context state, so they
+ * These fixed-length digests have no configurable per-context state, so they
  * must advertise neither direction: an attempt to change their output size
  * must fail rather than succeed without changing anything, and there must be
  * nothing to read back per context either. The default provider's own
@@ -248,6 +251,7 @@ static int test_digest_aliases(void)
 		"SHA512-224",	"2.16.840.1.101.3.4.2.5",
 		"SHA2-512/256", "SHA-512/256",
 		"SHA512-256",	"2.16.840.1.101.3.4.2.6",
+		"SM3",		"1.2.156.10197.1.401",
 	};
 
 	for (size_t i = 0; i < ARRAY_SIZE(aliases); i++) {

@@ -8,7 +8,7 @@
 //! with [`core::mem::take`] (finalize the current state, leave a fresh one).
 
 use bouncycastle::core::traits::{Hash, HashAlgParams, Suspendable};
-use bouncycastle::{sha2, sha3};
+use bouncycastle::{sha2, sha3, sm3};
 use rustle::digest::{Digest, Error, Output, Result};
 use rustle::params::Params;
 
@@ -84,6 +84,7 @@ where
 const SHA256_LEN: usize = sha2::SUSPENDED_SHA256_STATE_LEN;
 const SHA512_LEN: usize = sha2::SUSPENDED_SHA512_STATE_LEN;
 const SHA3_LEN: usize = sha3::SUSPENDED_SHA3_STATE_LEN;
+const SM3_LEN: usize = sm3::SUSPENDED_SM3_STATE_LEN;
 
 /// bc-rust's SHA2-224 as a provider digest.
 pub type BcSha2_224 = BcDigest<sha2::SHA224, SHA256_LEN>;
@@ -106,3 +107,6 @@ pub type BcSha3_256 = BcDigest<sha3::SHA3_256, SHA3_LEN>;
 pub type BcSha3_384 = BcDigest<sha3::SHA3_384, SHA3_LEN>;
 /// bc-rust's SHA3-512 as a provider digest.
 pub type BcSha3_512 = BcDigest<sha3::SHA3_512, SHA3_LEN>;
+
+/// bc-rust's SM3 as a provider digest.
+pub type BcSm3 = BcDigest<sm3::SM3, SM3_LEN>;
