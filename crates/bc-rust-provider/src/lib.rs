@@ -33,7 +33,7 @@ const PROPERTIES: &CStr = c"provider=bc_rust";
 /// merge regardless of provider load order — without them, loading this
 /// provider before `default` creates a rival name group and the conflict
 /// makes the digest unfetchable from either provider.
-static DIGESTS: [OSSL_ALGORITHM; 10] = [
+static DIGESTS: [OSSL_ALGORITHM; 11] = [
     OSSL_ALGORITHM::new(
         c"SHA2-224:SHA-224:SHA224:2.16.840.1.101.3.4.2.4",
         PROPERTIES,
@@ -63,6 +63,12 @@ static DIGESTS: [OSSL_ALGORITHM; 10] = [
         PROPERTIES,
         DigestAlgorithm::<BcSha2_512_224>::functions(),
         c"bc-rust SHA-512/224",
+    ),
+    OSSL_ALGORITHM::new(
+        c"SHA2-512/256:SHA-512/256:SHA512-256:2.16.840.1.101.3.4.2.6",
+        PROPERTIES,
+        DigestAlgorithm::<BcSha2_512_256>::functions(),
+        c"bc-rust SHA-512/256",
     ),
     OSSL_ALGORITHM::new(
         c"SHA3-224:2.16.840.1.101.3.4.2.7",
