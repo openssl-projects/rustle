@@ -26,6 +26,7 @@ openssl list -provider-path target/debug -provider libbc_rust -digest-algorithms
 ```text
 Provided:
   { 2.16.840.1.101.3.4.2.1, SHA-256, SHA2-256, SHA256 } @ libbc_rust
+  { 2.16.840.1.101.3.4.2.6, SHA-512/256, SHA2-512/256, SHA512-256 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.4, SHA-224, SHA2-224, SHA224 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.7, SHA3-224 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.9, SHA3-384 } @ libbc_rust
