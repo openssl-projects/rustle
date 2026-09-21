@@ -20,6 +20,14 @@
 # include <openssl/err.h>
 #endif
 
+#if defined(__APPLE__) || defined(__linux__)
+/* ASan reads this before main; ASAN_OPTIONS overrides these defaults. */
+const char *__asan_default_options(void)
+{
+	return "detect_leaks=1";
+}
+#endif
+
 #ifndef MAX_TESTS
 # define MAX_TESTS 1024
 #endif
