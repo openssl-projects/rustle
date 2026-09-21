@@ -41,6 +41,8 @@ static const struct digest_kat digest_kats[] = {
 	  "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee6"
 	  "4b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e"
 	  "2a9ac94fa54ca49f" },
+	{ "SHA2-512/224", 28, 128,
+	  "4634270f707b6a54daae7530460842e20e37ed265ceee9a43e8924aa" },
 	{ "SHA3-224", 28, 144,
 	  "e642824c3f8cf24ad09234ee7d3c766fc9a3a5168d0c94ad73b46fdf" },
 	{ "SHA3-256", 32, 136,
@@ -234,11 +236,13 @@ err:
 static int test_digest_aliases(void)
 {
 	static const char *const aliases[] = {
-		"SHA2-256", "SHA-256",
-		"SHA256",   "2.16.840.1.101.3.4.2.1",
-		"SHA2-512", "SHA-512",
-		"SHA512",   "2.16.840.1.101.3.4.2.3",
-		"SHA3-256", "2.16.840.1.101.3.4.2.8",
+		"SHA2-256",	"SHA-256",
+		"SHA256",	"2.16.840.1.101.3.4.2.1",
+		"SHA2-512",	"SHA-512",
+		"SHA512",	"2.16.840.1.101.3.4.2.3",
+		"SHA3-256",	"2.16.840.1.101.3.4.2.8",
+		"SHA2-512/224", "SHA-512/224",
+		"SHA512-224",	"2.16.840.1.101.3.4.2.5",
 	};
 
 	for (size_t i = 0; i < ARRAY_SIZE(aliases); i++) {

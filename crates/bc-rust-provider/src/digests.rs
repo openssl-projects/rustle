@@ -93,6 +93,8 @@ pub type BcSha2_256 = BcDigest<sha2::SHA256, SHA256_LEN>;
 pub type BcSha2_384 = BcDigest<sha2::SHA384, SHA512_LEN>;
 /// bc-rust's SHA2-512 as a provider digest.
 pub type BcSha2_512 = BcDigest<sha2::SHA512, SHA512_LEN>;
+/// bc-rust's SHA2-512/224 as a provider digest.
+pub type BcSha2_512_224 = BcDigest<sha2::SHA512_224, SHA512_LEN>;
 
 /// bc-rust's SHA3-224 as a provider digest.
 pub type BcSha3_224 = BcDigest<sha3::SHA3_224, SHA3_LEN>;
