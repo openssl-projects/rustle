@@ -36,20 +36,27 @@ which is these steps, each also a target of its own:
 | `cargo build -p rustle --no-default-features --features abort` (`no_std`) | `build-no-std` |
 | `cargo build -p rustle --features std` | `build-std` |
 | `cargo build -p bc-rust-provider` (the module) | `module` |
-| Build the C test programs without running them | `bulid-test` |
+| Build the C test programs without running them | `build-test` |
 | `cargo fmt --check` | `rust-fmt-check` |
 | `clang-format --dry-run --Werror` over the C test sources | `c-fmt-check` |
 | `cargo test` — Rust tests and doctests | `cargo-test` |
 | `prove` over `test/recipes/` — C-side KATs | `c-test` |
 
 `fmt-check` runs both formatting checks, and `make test` runs the last two
-together. `PROFILE=release` builds and tests
-against `target/release` instead; `PROVE_FLAGS` passes through to the TAP
-harness. `make help` lists the rest.
+together. `PROFILE` accepts `debug` (the default) or `release` and selects both
+the Cargo profile and the module directory (`target/debug` or `target/release`).
+For example, `make PROFILE=release c-test` runs the C suite against the release
+module. Other profile names are rejected;
+`CARGO_FLAGS` is no longer used.
+`PROVE_FLAGS` passes through to the TAP harness. `make help` lists the rest.
 
 The C formatting targets require clang-format; CI pins 22.1.8 for reproducible
 results. Set `CLANG_FORMAT` when that binary is installed under a versioned or
 non-standard name.
+
+C builds check that `pkg-config` can find `libcrypto` before compiling any C
+source, and stop with its diagnostic if discovery fails. Rust-only targets,
+`help`, and `clean` do not require `pkg-config` or libcrypto.
 
 On macOS, the system `openssl` is LibreSSL and Homebrew keeps `openssl@3`
 keg-only, so `pkg-config` finds no `libcrypto.pc` by default. Point it at the
@@ -70,7 +77,7 @@ system OpenSSL, pass its root once:
 make OPENSSL_ROOT_DIR=/path/to/openssl check
 ```
 
-This selects the OpenSSL build used by the tests. Switching roots does not
+This selects the libcrypto build used by the C tests. Switching roots does not
 require `make clean`.
 
 The `no_std` build is the one that breaks silently: `bc-rust-provider` pulls
@@ -90,6 +97,24 @@ loaded by OpenSSL.
 
 ### Running C tests
 
+Requested C test programs are rebuilt on every build or test invocation,
+including their shared sources. The suite is small enough that rebuilding is
+cheap; this avoids tracking header dependencies and configuration changes.
+Each source is compiled separately, so compilation-database tools still work.
+All build rules live in the root `Makefile`: shared objects and providers are
+built once per invocation, including under `make -j check`.
+Add C programs to `TEST_SRCS` there and their TAP recipes under `test/recipes/`.
+
+The C rules honor `CC`, `CPPFLAGS`, `CFLAGS`, `LDFLAGS`, and `LDLIBS`.
+`CFLAGS` defaults to `-O2 -g` and is passed during both compilation and linking;
+`CPPFLAGS` applies to compilation, while `LDFLAGS` and `LDLIBS` apply to linking.
+Project include paths, test definitions, and warning flags are kept separately,
+so overriding `CFLAGS` does not discard them. For example:
+
+```sh
+make CFLAGS='-O0 -g' c-test
+```
+
 The `prove` harness collects results across the C test programs. Use `-v`
 for verbose output or `-j` to run recipes in parallel:
 
@@ -103,7 +128,7 @@ After building, a single recipe can also run directly:
 prove -v test/recipes/02-test_evp_md.t
 ```
 
-When a failure needs picking apart, `make -C test run` runs the same programs
+When a failure needs picking apart, `make run` runs the same programs
 without the harness in the way, and a program run directly takes `-list`,
 `-test N` and `-iter N` to narrow down to a single case.
 

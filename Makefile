@@ -3,7 +3,7 @@
 
 # Top-level entry point.
 #
-#   make            build both rustle configurations and the module
+#   make            build both rustle configurations, the module, and C tests
 #   make test       the two test suites: cargo's, and the C one under prove
 #   make c-test     just the C suite, under the TAP harness
 #   make check      everything a change has to pass before it is done
@@ -16,39 +16,67 @@
 CARGO  ?= cargo
 MDBOOK ?= mdbook
 CLANG_FORMAT ?= clang-format
+CC ?= cc
+PKGCONF ?= pkg-config
+PROVE ?= prove
+PROVE_FLAGS ?=
 
 C_FORMAT_SRCS := $(shell find test -type f \( -name '*.c' -o -name '*.h' \) -print)
 
-# Normalize the public OpenSSL build-tree selector once. pkg-config's search
-# path and the OPENSSL variable consumed by the Rust tests remain internal
-# implementation details.
+# Select libcrypto from a configured OpenSSL build tree for the C tests.
 ifneq ($(strip $(OPENSSL_ROOT_DIR)),)
   OPENSSL_ROOT := $(abspath $(patsubst ~/%,$(HOME)/%,$(OPENSSL_ROOT_DIR)))
-  OPENSSL_BIN := $(OPENSSL_ROOT)/apps/openssl
   OPENSSL_PKG_CONFIG_ENV := PKG_CONFIG_PATH='$(OPENSSL_ROOT)'
-else
-  OPENSSL_BIN := openssl
 endif
 
-# The cargo profile to build and test against. test/Makefile looks for the
-# module under target/$(PROFILE), so the flag is derived from PROFILE rather
-# than set on its own -- the two cannot then disagree.
+# Cargo calls the debug profile "dev", but writes its artifacts to target/debug.
 PROFILE ?= debug
-ifeq ($(PROFILE),release)
-  CARGO_FLAGS ?= --release
+ifeq ($(PROFILE),debug)
+  override CARGO_PROFILE := dev
+else ifeq ($(PROFILE),release)
+  override CARGO_PROFILE := release
 else
-  CARGO_FLAGS ?=
+  $(error Unsupported PROFILE '$(PROFILE)'; use debug or release)
 endif
 
-# Everything test/Makefile needs from up here. PROVE_FLAGS is passed through
-# unset as well, so `make PROVE_FLAGS=-v c-test` reaches the harness.
-SUBMAKE = $(OPENSSL_PKG_CONFIG_ENV) $(MAKE) -C test \
-	PROFILE=$(PROFILE) CARGO='$(CARGO)' \
-	CARGO_FLAGS='$(CARGO_FLAGS)' PROVE_FLAGS='$(PROVE_FLAGS)'
+# Keep clean/help and Rust-only targets independent of pkg-config.
+OSSL_CFLAGS = $(shell $(OPENSSL_PKG_CONFIG_ENV) $(PKGCONF) --cflags libcrypto)
+OSSL_LIBS = $(shell $(OPENSSL_PKG_CONFIG_ENV) $(PKGCONF) --libs libcrypto)
+OSSL_LIBDIR = $(shell $(OPENSSL_PKG_CONFIG_ENV) $(PKGCONF) --variable=libdir libcrypto)
 
-.PHONY: all build build-no-std build-std module bulid-test \
-	test c-test cargo-test check fmt rust-fmt c-fmt fmt-check \
-	rust-fmt-check c-fmt-check clippy docs clean help FORCE
+MODULE_DIR ?= $(abspath target/$(PROFILE))
+CFLAGS ?= -O2 -g
+# Keep project flags separate so command-line CFLAGS cannot discard them.
+TEST_CPPFLAGS = -DDEFAULT_MODULE_DIR=\"$(MODULE_DIR)\" -Itest $(OSSL_CFLAGS)
+TEST_CFLAGS := -Wall -Wextra -Wno-unused-parameter -Wshadow -pedantic -std=c99
+
+# Rust names the cdylib the platform's way; Windows has no "lib" prefix.
+UNAME := $(shell uname -s)
+ifeq ($(UNAME),Darwin)
+  MODULE := libbc_rust.dylib
+else ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME)))
+  MODULE := bc_rust.dll
+  EXE := .exe
+else
+  MODULE := libbc_rust.so
+endif
+
+# Test binaries locate libcrypto without runtime environment variables.
+ifeq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME)))
+  RPATH_LDFLAGS = -Wl,-rpath,$(OSSL_LIBDIR)
+endif
+
+COMMON_SRCS := test/testutil/driver.c test/testutil/provider.c
+TEST_SRCS := test/provider_test.c test/evp_md_test.c test/params_test.c
+TESTS := $(TEST_SRCS:%.c=%$(EXE))
+SRCS := $(TEST_SRCS) $(COMMON_SRCS)
+OBJS := $(SRCS:.c=.o)
+COMMON_OBJS := $(COMMON_SRCS:.c=.o)
+RECIPES := $(sort $(wildcard test/recipes/*.t))
+
+.PHONY: all build build-no-std build-std module build-test \
+	params-provider run test c-test cargo-test check fmt rust-fmt c-fmt fmt-check \
+	rust-fmt-check c-fmt-check clippy docs clean help check-libcrypto FORCE
 
 all: build
 
@@ -59,40 +87,66 @@ all: build
 # rustle has to compile in both of its configurations, and the no_std one is
 # the half that breaks silently: bc-rust-provider pulls in std, so building
 # only the module never reports that rustle stopped being no_std-clean.
-build: build-no-std build-std module bulid-test
+build: build-no-std build-std module build-test
 
 build-no-std:
-	$(CARGO) build -p rustle --no-default-features --features abort $(CARGO_FLAGS)
+	$(CARGO) build -p rustle --no-default-features --features abort --profile $(CARGO_PROFILE)
 
 build-std:
-	$(CARGO) build -p rustle --features std $(CARGO_FLAGS)
+	$(CARGO) build -p rustle --features std --profile $(CARGO_PROFILE)
 
 module:
-	$(CARGO) build -p bc-rust-provider $(CARGO_FLAGS)
+	$(CARGO) build -p bc-rust-provider --profile $(CARGO_PROFILE)
 
-bulid-test:
-	$(SUBMAKE) all
+build-test: $(TESTS)
 
-# Build one test program by path, e.g. `make test/evp_md_test`.
-test/%: FORCE
-	$(SUBMAKE) $*
+# The C suite is small: rebuild rather than track headers and configuration.
+$(OBJS): FORCE | check-libcrypto
+
+check-libcrypto:
+	$(OPENSSL_PKG_CONFIG_ENV) $(PKGCONF) --print-errors --exists libcrypto
+
+# Compile separately so compilation-database tools record each source.
+test/%.o: test/%.c
+	$(CC) $(CPPFLAGS) $(TEST_CPPFLAGS) $(TEST_CFLAGS) $(CFLAGS) -c -o $@ $<
+
+# The inline-string setter uses a test-only provider.
+test/params_test.o: TEST_CPPFLAGS += -DPARAMS_PROVIDER_PATH=\"$(abspath $(MODULE_DIR))/examples/$(subst bc_rust,params_provider,$(MODULE))\"
+test/params_test$(EXE): | params-provider
+
+params-provider:
+	$(CARGO) build -p rustle --example params_provider --features std --profile $(CARGO_PROFILE)
+
+$(TESTS): %$(EXE): %.o $(COMMON_OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(OSSL_LIBS) $(LDLIBS) $(RPATH_LDFLAGS)
+ifeq ($(UNAME),Darwin)
+	@crypto_install_name=$$(otool -L '$@' \
+		| awk '/libcrypto.*[.]dylib/ { print $$1; exit }'); \
+	case "$$crypto_install_name" in \
+	/*) install_name_tool -change "$$crypto_install_name" \
+		"@rpath/$$(basename "$$crypto_install_name")" '$@' ;; \
+	esac
+endif
 
 # ------------------------------------------------------------------ #
 # Testing                                                            #
 # ------------------------------------------------------------------ #
 
-# The two suites. cargo's drives the module through the openssl CLI; the C
-# one drives it through libcrypto's EVP API, reaching what the CLI cannot.
+# Rust tests and doctests, plus C tests through libcrypto's EVP API.
 test: cargo-test c-test
 
 # The C suite under prove: one recipe per test program in test/recipes/.
-c-test:
-	$(SUBMAKE) c-test
+c-test: build-test module
+	BC_RUST_TEST_DIR='$(abspath test)' \
+	BC_RUST_MODULE='$(abspath $(MODULE_DIR)/$(MODULE))' \
+	$(PROVE) $(PROVE_FLAGS) $(RECIPES)
 
-# Note that the CLI known-answer tests skip -- passing vacuously -- when no
-# OpenSSL 3.x binary is found; OPENSSL_ROOT_DIR selects a custom build tree.
+# Raw TAP without the harness; individual programs also take -list/-test/-iter.
+run: build-test module
+	for t in $(TESTS); do ./$$t '$(abspath $(MODULE_DIR)/$(MODULE))' || exit 1; done
+
 cargo-test:
-	OPENSSL='$(OPENSSL_BIN)' $(CARGO) test $(CARGO_FLAGS)
+	$(CARGO) test --profile $(CARGO_PROFILE)
 
 # The full gate: both configurations build, formatting is clean, both suites
 # pass.
@@ -119,29 +173,31 @@ c-fmt-check:
 	$(CLANG_FORMAT) --style=file --dry-run --Werror $(C_FORMAT_SRCS)
 
 clippy:
-	$(CARGO) clippy --all-targets $(CARGO_FLAGS)
+	$(CARGO) clippy --all-targets --profile $(CARGO_PROFILE)
 
 docs:
 	$(MDBOOK) build docs
 
 clean:
 	$(CARGO) clean
-	$(SUBMAKE) clean
+	rm -f $(TESTS) $(OBJS)
+	rm -rf $(TESTS:%=%.dSYM)
 
 help:
 	@printf '%s\n' \
 	'Targets:' \
 	'  all            build (the default)' \
-	'  build          both rustle configurations and the module' \
+	'  build          both rustle configurations, the module, and C tests' \
 	'  build-no-std   rustle without std, with its panic handler' \
 	'  build-std      rustle with std' \
 	'  module         the loadable provider cdylib' \
-	'  bulid-test     build the C test programs without running them' \
+	'  build-test     build the C test programs without running them' \
 	'  test/<name>    build one test program by name, e.g. test/evp_md_test' \
 	'' \
 	'  test           cargo-test and c-test' \
 	'  c-test         the C suite under the TAP harness' \
-	'  cargo-test     doctests and the openssl-CLI known answers' \
+	'  run            the C suite directly, with raw TAP output' \
+	'  cargo-test     Rust tests and doctests' \
 	'  check          build, fmt-check, test' \
 	'' \
 	'  fmt            format Rust and C sources' \
@@ -155,6 +211,7 @@ help:
 	'  clean          cargo clean and drop the C build artifacts' \
 	'' \
 	'Variables: PROFILE (debug|release), PROVE_FLAGS, CARGO, MDBOOK,' \
-	'CLANG_FORMAT, OPENSSL_ROOT_DIR'
+	'CLANG_FORMAT, OPENSSL_ROOT_DIR, CC, PKGCONF, PROVE,' \
+	'CPPFLAGS, CFLAGS, LDFLAGS, LDLIBS'
 
 FORCE:

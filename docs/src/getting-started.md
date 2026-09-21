@@ -54,23 +54,14 @@ so a correct answer here can only have come from bc-rust.
 ## Run the tests
 
 ```sh
-make cargo-test
-```
-
-The end-to-end known-answer tests drive the built module through the
-`openssl` CLI. They skip — passing vacuously — when no OpenSSL 3.x binary is
-found. To select a custom configured build tree, use
-`OPENSSL_ROOT_DIR=/path/to/openssl`.
-
-There is a second suite that drives the module through libcrypto's EVP API
-instead, written in C and run under `prove`. `make test` at the workspace
-root runs both:
-
-```sh
 make test
 ```
 
-To use a custom configured OpenSSL build tree for both suites:
+This runs the Rust tests and doctests (`make cargo-test`) and the C suite
+under `prove` (`make c-test`). The C suite drives the provider through
+libcrypto's EVP API.
+
+To select a custom configured OpenSSL build tree for the C suite:
 
 ```sh
 make OPENSSL_ROOT_DIR=/path/to/openssl test
