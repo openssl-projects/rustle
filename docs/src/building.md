@@ -132,6 +132,28 @@ When a failure needs picking apart, `make run` runs the same programs
 without the harness in the way, and a program run directly takes `-list`,
 `-test N` and `-iter N` to narrow down to a single case.
 
+### C sanitizers
+
+Pass sanitizer flags when compiling and linking the C tests:
+
+```sh
+make CFLAGS='-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined' \
+     LDFLAGS='-fsanitize=address,undefined' c-test
+```
+
+On macOS and Linux, the shared driver supplies `__asan_default_options`
+with `detect_leaks=1`. A LeakSanitizer-capable ASan runtime therefore checks
+for leaks at normal process exit, including when a test is run directly.
+No environment setting is needed. `ASAN_OPTIONS` overrides these defaults;
+for example, `ASAN_OPTIONS=detect_leaks=0 ./test/evp_xof_test` disables the
+exit-time leak check for that invocation. Unsanitized builds do not use the
+hook.
+
+These flags instrument the C tests and shared test utilities. Instrumenting
+OpenSSL or the Rust provider requires building those components separately
+with their sanitizer settings. LeakSanitizer can still track intercepted
+heap allocations from libraries without compiler instrumentation.
+
 ## Layout
 
 ```text
