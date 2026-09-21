@@ -12,7 +12,7 @@ translate: it C<exec>s the program and the driver's output I<is> the recipe's
 output. What a recipe cannot work out for itself is where the program and the
 provider module ended up, which is all this module answers.
 
-F<test/Makefile> passes both in the environment, so the guesses here only
+The root F<Makefile> passes both in the environment, so the guesses here only
 matter when a recipe is run by hand:
 
   BC_RUST_TEST_DIR   directory holding the compiled test programs
@@ -49,7 +49,7 @@ sub top_dir
 }
 
 # Rust names a cdylib the platform's way; Windows has no "lib" prefix. Kept
-# in step with the same three cases in test/Makefile.
+# in step with the same three cases in the root Makefile.
 sub module_file
 {
 	return 'libbc_rust.dylib' if $^O eq 'darwin';
