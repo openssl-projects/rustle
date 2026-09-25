@@ -67,7 +67,8 @@ ifeq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME)))
 endif
 
 COMMON_SRCS := test/testutil/driver.c test/testutil/provider.c
-TEST_SRCS := test/provider_test.c test/evp_md_test.c test/params_test.c
+TEST_SRCS := test/provider_test.c test/evp_md_test.c test/params_test.c \
+	test/evp_xof_test.c
 TESTS := $(TEST_SRCS:%.c=%$(EXE))
 SRCS := $(TEST_SRCS) $(COMMON_SRCS)
 OBJS := $(SRCS:.c=.o)

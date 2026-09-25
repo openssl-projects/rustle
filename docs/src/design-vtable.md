@@ -26,6 +26,12 @@ The attribute expresses that distinction through generated presence metadata:
 |-----------------------|-------------------|-------------------|
 | Defines `dupctx` | `HAS_DUPCTX = true` | Included |
 | Omits `dupctx` | `HAS_DUPCTX = false` | Omitted |
+| Defines `squeeze` | `HAS_SQUEEZE = true` | Included |
+| Omits `squeeze` | `HAS_SQUEEZE = false` | Omitted |
+
+Squeezing uses the same `Digest` interface and opaque table as fixed-length
+digests. Its default returns `Unsupported`; fixed-length implementations
+omit the method and therefore advertise no `OSSL_FUNC_DIGEST_SQUEEZE` entry.
 
 Authors implement methods rather than maintaining a second list of capability
 flags. The attribute rejects handwritten overrides of its presence metadata

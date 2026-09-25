@@ -52,6 +52,36 @@ Keeping the callback table opaque preserves the relationship between context
 creation, use, and destruction. Checking each callback's signature alone would
 not prevent mixing methods from different context types.
 
+### Incremental output
+
+Extendable-output functions can implement the optional `Digest::squeeze`
+method. It receives an `Output` and an explicit requested length, matching
+OpenSSL's `digest_squeeze` callback used by `EVP_DigestSqueeze`. The request
+is independent of any configured finalization length: repeated calls consume
+successive portions of the same output stream.
+
+For nonzero requests, the adapter lends exactly the requested amount of writable
+storage and reports success only when the method succeeds and commits that many bytes. It accepts
+a null output pointer only for a zero-length request, and permits the caller
+to omit the output-length slot. When supplied, that slot is written only on
+success. Output may initially be uninitialized, as with finalization.
+
+The implementation owns the sponge phase and reset policy. For algorithms
+implementing squeeze, the adapter treats zero-length requests as successful
+no-ops without invoking the method, matching OpenSSL's `shake_squeeze`.
+It writes zero to the output-length slot when supplied. Unsupported algorithms
+still fail. Rejecting null output for nonzero requests is rustle's defensive
+validation, not a promise that OpenSSL rejects that invalid input cleanly.
+Implementations must check capacity before advancing state; `Output::write_with` makes that
+check before invoking its callback. An implementation error or short write
+is reported as C failure without rolling back bytes or context state.
+
+The bc-rust SHAKE adapter keeps the live sponge, configured finalization
+length and phase together. Copies preserve all three. Zero-byte output calls
+are handled before entering bc-rust, whose squeeze operation would otherwise
+pad the sponge even for an empty output. SHAKE's externally visible rules are
+described under [supported algorithms](./algorithms.md#shake-output-lengths-and-lifecycle).
+
 ## Algorithm properties and context parameters
 
 Algorithm properties describe fixed characteristics such as digest and block
@@ -104,7 +134,8 @@ when a destination already exists: it avoids allocating another outer context
 merely to replace the old one. The callback has no error return, which is why
 its contract is stricter than fallible duplication.
 
-Serialization saves a computation so it can be restored into an initialized
+For implementations that advertise it, serialization saves a computation so
+it can be restored into an initialized
 context of the same algorithm. The bc-rust provider leaves the source usable
 after serialization and preserves the destination's state when restoration
 is rejected.
