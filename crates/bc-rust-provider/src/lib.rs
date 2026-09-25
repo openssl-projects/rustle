@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 pub mod digests;
+pub mod shakes;
 
 use core::ffi::CStr;
 
@@ -21,6 +22,7 @@ use rustle::digest::DigestAlgorithm;
 use rustle::provider::{Provider, ProviderDesc};
 
 use crate::digests::*;
+use crate::shakes::{BcShake128, BcShake256};
 
 /// Property set identifying this provider's algorithms
 /// (fetchable via `-propquery provider=bc_rust`).
@@ -33,7 +35,7 @@ const PROPERTIES: &CStr = c"provider=bc_rust";
 /// merge regardless of provider load order — without them, loading this
 /// provider before `default` creates a rival name group and the conflict
 /// makes the digest unfetchable from either provider.
-static DIGESTS: [OSSL_ALGORITHM; 12] = [
+static DIGESTS: [OSSL_ALGORITHM; 14] = [
     OSSL_ALGORITHM::new(
         c"SHA2-224:SHA-224:SHA224:2.16.840.1.101.3.4.2.4",
         PROPERTIES,
@@ -99,6 +101,18 @@ static DIGESTS: [OSSL_ALGORITHM; 12] = [
         PROPERTIES,
         DigestAlgorithm::<BcSm3>::functions(),
         c"bc-rust SM3",
+    ),
+    OSSL_ALGORITHM::new(
+        c"SHAKE-128:SHAKE128:2.16.840.1.101.3.4.2.11",
+        PROPERTIES,
+        DigestAlgorithm::<BcShake128>::functions(),
+        c"bc-rust SHAKE-128",
+    ),
+    OSSL_ALGORITHM::new(
+        c"SHAKE-256:SHAKE256:2.16.840.1.101.3.4.2.12",
+        PROPERTIES,
+        DigestAlgorithm::<BcShake256>::functions(),
+        c"bc-rust SHAKE-256",
     ),
     OSSL_ALGORITHM::END,
 ];

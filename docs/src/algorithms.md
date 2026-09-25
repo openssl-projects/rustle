@@ -1,6 +1,7 @@
 # Registered Algorithms
 
-`bc-rust-provider` supplies the following fixed-length hashes through bc-rust.
+`bc-rust-provider` supplies the following hashes and extendable-output
+functions through bc-rust.
 
 ## `OSSL_OP_DIGEST`
 
@@ -17,6 +18,8 @@
 | SHA3-384 | `SHA3-384:2.16.840.1.101.3.4.2.9` |
 | SHA3-512 | `SHA3-512:2.16.840.1.101.3.4.2.10` |
 | SM3 | `SM3:1.2.156.10197.1.401` |
+| SHAKE128 | `SHAKE-128:SHAKE128:2.16.840.1.101.3.4.2.11` |
+| SHAKE256 | `SHAKE-256:SHAKE256:2.16.840.1.101.3.4.2.12` |
 
 ## Selecting the provider
 
@@ -50,13 +53,45 @@ method; a default Rust method alone does not establish support. See
 
 ## Supported behavior
 
-All listed digests support streaming, context duplication, context copying,
-and state serialization where supported by OpenSSL. These fixed-length hashes
+All listed algorithms support streaming, context duplication and context
+copying. The fixed-length hashes also support state serialization where
+supported by OpenSSL. These fixed-length hashes
 have no configurable context parameters, so they register context parameters
 in neither direction, matching the default provider's fixed-length digest
 interface. Digest and block sizes are algorithm-wide properties, not settings
 of an individual computation. The Crate Split explains this
 [parameter distinction](./design-split.md#algorithm-properties-and-context-parameters)
 and the [state compatibility policy](./design-split.md#digest-state).
+
+### SHAKE output lengths and lifecycle
+
+SHAKE128 and SHAKE256 advertise `xof=1` and algorithm-wide `size=0`.
+Their block sizes (sponge rates) are 168 and 136 bytes respectively. Final
+output has no implicit default length: use `EVP_DigestFinalXOF`, or select
+a length through `xoflen` or its `size` alias before ordinary finalization.
+Both names are gettable and settable unsigned context parameters. An unset
+length is returned as `SIZE_MAX`; setting that value restores the unset
+state. Reinitialization resets the sponge but retains the length unless
+initialization parameters replace it. Supplying either name more than once,
+or both aliases together, fails without changing the configured length.
+
+`EVP_DigestSqueeze` consumes successive portions of the output stream using
+each call's requested length, independently of the configured finalization
+length. Nonempty updates after squeezing are rejected, as are finalization
+after squeezing and nonzero output operations after nonzero finalization.
+This follows the current upstream phase rules rather than OpenSSL 3.6.3's
+acceptance of the tested late update.
+
+Zero-length operations follow the measured default-provider behavior:
+zero-byte updates and squeezes leave the sponge untouched; a zero-byte
+squeeze succeeds even after finalization. Explicitly selecting zero is
+distinct from leaving the length unset, although ordinary EVP finalization
+rejects both. `EVP_DigestFinalXOF` with zero succeeds without advancing the
+sponge. EVP prevents another FinalXOF call, but subsequent squeezing remains
+possible. The provider's phase and EVP's finalized flag are separate state.
+
+Duplication and copying preserve the sponge position, configured length and
+phase. SHAKE state serialization is not advertised: a future format must
+preserve the provider's metadata as well as the underlying sponge state.
 
 Other OpenSSL operation types are not currently supported.

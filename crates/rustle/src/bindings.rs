@@ -54,6 +54,13 @@ pub type DigestFinalFn = unsafe extern "C" fn(
     outl: *mut usize,
     outsz: usize,
 ) -> ffi::c_int;
+/// Signature of `OSSL_FUNC_digest_squeeze` — continue an XOF's output stream.
+pub type DigestSqueezeFn = unsafe extern "C" fn(
+    dctx: *mut ffi::c_void,
+    out: *mut u8,
+    outl: *mut usize,
+    outsz: usize,
+) -> ffi::c_int;
 /// Signature of `OSSL_FUNC_digest_serialize` — query size (null `out`) or
 /// export state (non-null `out`, with `*outl` as in/out capacity/length).
 pub type DigestSerializeFn =
@@ -216,6 +223,8 @@ impl OSSL_DISPATCH {
     ///
     /// [`get_ctx_params`]: Self::OSSL_FUNC_DIGEST_GET_CTX_PARAMS
     pub const OSSL_FUNC_DIGEST_GETTABLE_CTX_PARAMS: ffi::c_int = 13;
+    /// Squeeze further output from an extendable-output function.
+    pub const OSSL_FUNC_DIGEST_SQUEEZE: ffi::c_int = 14;
     /// Copy digest state into an existing context of the same implementation.
     pub const OSSL_FUNC_DIGEST_COPYCTX: ffi::c_int = 15;
     /// Export digest state, or query its maximum serialized size through a
@@ -324,6 +333,12 @@ impl OSSL_DISPATCH {
     #[must_use]
     pub(crate) const fn digest_final(f: DigestFinalFn) -> Self {
         Self::erase(Self::OSSL_FUNC_DIGEST_FINAL, f as *const ())
+    }
+
+    /// Builds the `OSSL_FUNC_DIGEST_SQUEEZE` entry.
+    #[must_use]
+    pub(crate) const fn digest_squeeze(f: DigestSqueezeFn) -> Self {
+        Self::erase(Self::OSSL_FUNC_DIGEST_SQUEEZE, f as *const ())
     }
 
     /// Builds the `OSSL_FUNC_DIGEST_SERIALIZE` entry.

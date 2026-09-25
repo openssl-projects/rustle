@@ -2,6 +2,254 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::bindings::DigestSqueezeFn;
+
+// View the exported table as OpenSSL does, without exposing its private fields.
+#[repr(C)]
+struct CDispatch {
+    function_id: ffi::c_int,
+    function: Option<unsafe extern "C" fn()>,
+}
+
+fn registered_squeeze<D: Digest>() -> Option<DigestSqueezeFn> {
+    for entry in DigestAlgorithm::<D>::functions().entries {
+        if entry.is_end() {
+            break;
+        }
+        // SAFETY: both repr(C) structs have the core_dispatch.h field layout.
+        let raw = unsafe { &*core::ptr::from_ref(entry).cast::<CDispatch>() };
+        // Use the C ABI's ID independently of rustle's binding constant.
+        if raw.function_id == 14 {
+            let callback = raw.function?;
+            // SAFETY: ID 14's typed constructor accepts only DigestSqueezeFn.
+            return Some(unsafe {
+                core::mem::transmute::<unsafe extern "C" fn(), DigestSqueezeFn>(callback)
+            });
+        }
+    }
+    None
+}
+
+enum SqueezeBehavior {
+    Fill,
+    Reject,
+    Short,
+    Oversized,
+    RejectAfterWrite,
+}
+
+struct Squeezable {
+    next: u8,
+    calls: usize,
+    behavior: SqueezeBehavior,
+}
+
+#[crate::vtable]
+impl Digest for Squeezable {
+    fn newctx() -> Result<Self> {
+        Ok(Self {
+            next: 0,
+            calls: 0,
+            behavior: SqueezeBehavior::Fill,
+        })
+    }
+    fn init(&mut self, _params: Option<Params<'_>>) -> Result {
+        self.next = 0;
+        Ok(())
+    }
+    fn update(&mut self, _input: &[u8]) -> Result {
+        Ok(())
+    }
+    fn finalize(&mut self, _out: &mut Output<'_>) -> Result {
+        Err(Error::Unsupported)
+    }
+    crate::gettable_params! {
+        c"xof": INTEGER => |p| p.set_int(1),
+    }
+    fn squeeze(&mut self, out: &mut Output<'_>, len: usize) -> Result {
+        self.calls = self.calls.wrapping_add(1);
+        let count = match self.behavior {
+            SqueezeBehavior::Reject => return Err(Error::Unsupported),
+            SqueezeBehavior::Short => len.saturating_sub(1),
+            SqueezeBehavior::Oversized => len.saturating_add(1),
+            SqueezeBehavior::Fill | SqueezeBehavior::RejectAfterWrite => len,
+        };
+        out.write_with(count, |bytes| {
+            for byte in bytes {
+                *byte = self.next;
+                self.next = self.next.wrapping_add(1);
+            }
+            Ok(())
+        })?;
+        if matches!(self.behavior, SqueezeBehavior::RejectAfterWrite) {
+            return Err(Error::Unsupported);
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn squeeze_is_registered_only_when_implemented() {
+    const {
+        assert!(Squeezable::HAS_SQUEEZE);
+        assert!(!Configurable::HAS_SQUEEZE);
+    }
+    assert!(registered_squeeze::<Squeezable>().is_some());
+    assert!(registered_squeeze::<Configurable>().is_none());
+    assert!(
+        DigestAlgorithm::<Squeezable>::ENTRIES
+            .last()
+            .is_some_and(OSSL_DISPATCH::is_end)
+    );
+    let mut ctx = Configurable(0);
+    assert_eq!(
+        ctx.squeeze(&mut Output::new(&mut []), 0),
+        Err(Error::Unsupported)
+    );
+    let mut written = 42;
+    // SAFETY: live context and length slot; zero length permits null output.
+    let result = unsafe {
+        DigestAlgorithm::<Configurable>::squeeze(
+            core::ptr::from_mut(&mut ctx).cast(),
+            core::ptr::null_mut(),
+            &raw mut written,
+            0,
+        )
+    };
+    assert_eq!(result, 0);
+    assert_eq!(written, 42);
+}
+
+#[test]
+fn squeeze_continues_output_and_allows_an_omitted_length_slot() -> Result {
+    let squeeze = registered_squeeze::<Squeezable>().ok_or(Error::Unsupported)?;
+    let mut ctx = Squeezable::newctx()?;
+    let mut first = [MaybeUninit::<u8>::uninit(); 2];
+    let mut written = MaybeUninit::<usize>::uninit();
+    // SAFETY: live context, two writable uninitialized bytes and a separate
+    // writable length slot, exclusively borrowed for this callback.
+    let result = unsafe {
+        squeeze(
+            core::ptr::from_mut(&mut ctx).cast(),
+            first.as_mut_ptr().cast(),
+            written.as_mut_ptr(),
+            first.len(),
+        )
+    };
+    assert_eq!(result, 1);
+    // SAFETY: success initialized the length slot and both output bytes.
+    assert_eq!(unsafe { written.assume_init() }, 2);
+    // SAFETY: the callback reported that every output byte was initialized.
+    assert_eq!(first.map(|byte| unsafe { byte.assume_init() }), [0, 1]);
+
+    let mut second = [0xa5u8; 5];
+    // SAFETY: the middle three bytes are writable and disjoint from ctx.
+    // The squeeze contract permits a null output-length slot.
+    let result = unsafe {
+        squeeze(
+            core::ptr::from_mut(&mut ctx).cast(),
+            second.as_mut_ptr().wrapping_add(1),
+            core::ptr::null_mut(),
+            3,
+        )
+    };
+    assert_eq!(result, 1);
+    assert_eq!(second, [0xa5, 2, 3, 4, 0xa5]);
+    assert_eq!((ctx.next, ctx.calls), (5, 2));
+    Ok(())
+}
+
+#[test]
+fn squeeze_zero_length_calls_are_successful_noops() -> Result {
+    let squeeze = registered_squeeze::<Squeezable>().ok_or(Error::Unsupported)?;
+    let mut ctx = Squeezable::newctx()?;
+    let mut byte = 0xa5u8;
+    let mut written = 42;
+    for (out, outl) in [
+        (core::ptr::null_mut(), &raw mut written),
+        (&raw mut byte, core::ptr::null_mut()),
+        (core::ptr::null_mut(), core::ptr::null_mut()),
+    ] {
+        // SAFETY: zero length uses no output storage; ctx and any supplied
+        // length slot are valid and exclusively lent.
+        let result = unsafe { squeeze(core::ptr::from_mut(&mut ctx).cast(), out, outl, 0) };
+        assert_eq!(result, 1);
+    }
+    assert_eq!(written, 0);
+    assert_eq!(byte, 0xa5);
+    assert_eq!((ctx.next, ctx.calls), (0, 0));
+
+    ctx.behavior = SqueezeBehavior::Reject;
+    written = 42;
+    // SAFETY: live disjoint ctx/length slot; null output is valid for zero.
+    let result = unsafe {
+        squeeze(
+            core::ptr::from_mut(&mut ctx).cast(),
+            core::ptr::null_mut(),
+            &raw mut written,
+            0,
+        )
+    };
+    assert_eq!(result, 1);
+    assert_eq!(written, 0);
+    assert_eq!((ctx.next, ctx.calls), (0, 0));
+    Ok(())
+}
+
+#[test]
+fn squeeze_rejects_invalid_arguments_before_calling_implementation() -> Result {
+    let squeeze = registered_squeeze::<Squeezable>().ok_or(Error::Unsupported)?;
+    let mut ctx = Squeezable::newctx()?;
+    let ctx_ptr = core::ptr::from_mut(&mut ctx).cast();
+    let mut bytes = [0xa5u8; 2];
+    let mut written = 42;
+    for (dctx, out, len) in [
+        (core::ptr::null_mut(), bytes.as_mut_ptr(), 2),
+        (core::ptr::null_mut(), core::ptr::null_mut(), 0),
+        (ctx_ptr, core::ptr::null_mut(), 1),
+        (ctx_ptr, bytes.as_mut_ptr(), usize::MAX),
+    ] {
+        // SAFETY: invalid arguments are rejected before dereferencing or
+        // constructing a slice; the remaining pointers refer to live storage.
+        let result = unsafe { squeeze(dctx, out, &raw mut written, len) };
+        assert_eq!(result, 0);
+        assert_eq!(written, 42);
+        assert_eq!(bytes, [0xa5; 2]);
+    }
+    assert_eq!((ctx.next, ctx.calls), (0, 0));
+    Ok(())
+}
+
+#[test]
+fn squeeze_rejects_short_oversized_and_failed_writes() -> Result {
+    let squeeze = registered_squeeze::<Squeezable>().ok_or(Error::Unsupported)?;
+    for (behavior, expected, next) in [
+        (SqueezeBehavior::Reject, [0xa5; 4], 0),
+        (SqueezeBehavior::Short, [0xa5, 0, 0xa5, 0xa5], 1),
+        (SqueezeBehavior::Oversized, [0xa5; 4], 0),
+        (SqueezeBehavior::RejectAfterWrite, [0xa5, 0, 1, 0xa5], 2),
+    ] {
+        let mut ctx = Squeezable::newctx()?;
+        ctx.behavior = behavior;
+        let mut bytes = [0xa5u8; 4];
+        let mut written = 42;
+        // SAFETY: live ctx and length slot; the middle two bytes are writable
+        // output storage, disjoint from both. Guard bytes are outside it.
+        let result = unsafe {
+            squeeze(
+                core::ptr::from_mut(&mut ctx).cast(),
+                bytes.as_mut_ptr().wrapping_add(1),
+                &raw mut written,
+                2,
+            )
+        };
+        assert_eq!(result, 0);
+        assert_eq!(written, 42);
+        assert_eq!(bytes, expected);
+        assert_eq!((ctx.next, ctx.calls), (next, 1));
+    }
+    Ok(())
+}
 
 #[derive(Clone)]
 struct Copyable {

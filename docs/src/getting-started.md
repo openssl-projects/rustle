@@ -25,16 +25,18 @@ openssl list -provider-path target/debug -provider libbc_rust -digest-algorithms
 
 ```text
 Provided:
-  { 2.16.840.1.101.3.4.2.1, SHA-256, SHA2-256, SHA256 } @ libbc_rust
+  { 2.16.840.1.101.3.4.2.11, SHAKE-128, SHAKE128 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.6, SHA-512/256, SHA2-512/256, SHA512-256 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.4, SHA-224, SHA2-224, SHA224 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.7, SHA3-224 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.9, SHA3-384 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.3, SHA-512, SHA2-512, SHA512 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.5, SHA-512/224, SHA2-512/224, SHA512-224 } @ libbc_rust
+  { 2.16.840.1.101.3.4.2.12, SHAKE-256, SHAKE256 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.2, SHA-384, SHA2-384, SHA384 } @ libbc_rust
   { 1.2.156.10197.1.401, SM3 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.8, SHA3-256 } @ libbc_rust
+  { 2.16.840.1.101.3.4.2.1, SHA-256, SHA2-256, SHA256 } @ libbc_rust
   { 2.16.840.1.101.3.4.2.10, SHA3-512 } @ libbc_rust
 ```
 
@@ -50,6 +52,17 @@ SHA2-256(stdin)= ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015a
 
 Passing `-provider` without `-provider default` loads *only* this provider,
 so a correct answer here can only have come from bc-rust.
+
+For SHAKE, select the output length explicitly in bytes:
+
+```sh
+printf abc | openssl dgst -shake128 -xoflen 32 \
+    -provider-path target/debug -provider libbc_rust
+```
+
+```text
+SHAKE-128(stdin)= 5881092dd818bf5cf8a3ddb793fbcba74097d5c526a6d35f97b83351940f2cc8
+```
 
 ## Run the tests
 
