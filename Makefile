@@ -20,6 +20,7 @@ CC ?= cc
 PKGCONF ?= pkg-config
 PROVE ?= prove
 PROVE_FLAGS ?=
+OSSL_MIN_VERSION := 3.4
 
 C_FORMAT_SRCS := $(shell find test -type f \( -name '*.c' -o -name '*.h' \) -print)
 
@@ -105,7 +106,7 @@ build-test: $(TESTS)
 $(OBJS): FORCE | check-libcrypto
 
 check-libcrypto:
-	$(OPENSSL_PKG_CONFIG_ENV) $(PKGCONF) --print-errors --exists libcrypto
+	$(OPENSSL_PKG_CONFIG_ENV) $(PKGCONF) --print-errors --atleast-version=$(OSSL_MIN_VERSION) libcrypto
 
 # Compile separately so compilation-database tools record each source.
 test/%.o: test/%.c

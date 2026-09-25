@@ -1,6 +1,6 @@
 # rustle
 
-Rust crates for building OpenSSL 3.x/4.x [loadable
+Rust crates for building OpenSSL 3.4+ [loadable
 providers](https://docs.openssl.org/master/man7/provider/) — dynamically
 loaded modules that supply cryptographic algorithm implementations to
 libcrypto.
@@ -17,7 +17,7 @@ and *implementing cryptography* never live in the same crate:
 
 ## Quick start
 
-Needs a Rust toolchain with edition 2024 and an OpenSSL 3.x installation.
+Needs a Rust toolchain with edition 2024 and OpenSSL 3.4 or newer.
 Cargo fetches bc-rust automatically from Git.
 
 ```sh
