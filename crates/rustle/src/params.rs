@@ -70,11 +70,17 @@ impl OSSL_PARAM {
     /// ```
     #[must_use]
     pub const fn defn(key: &'static ffi::CStr, data_type: ffi::c_uint) -> Self {
+        let data_size = match data_type {
+            Self::INTEGER => size_of::<ffi::c_int>(),
+            Self::UNSIGNED_INTEGER => size_of::<usize>(),
+            Self::REAL => size_of::<f64>(),
+            _ => 0,
+        };
         Self {
             key: key.as_ptr(),
             data_type,
             data: core::ptr::null_mut(),
-            data_size: 0,
+            data_size,
             return_size: 0,
         }
     }
@@ -800,6 +806,17 @@ mod tests {
         // array with no data buffers, valid for this read-only view.
         let params = unsafe { Params::from_ptr(empty.as_ptr()) }.unwrap();
         assert_eq!(params.iter().count(), 0);
+    }
+
+    #[test]
+    fn descriptor_width_matches_accessor_width() {
+        let width = |ty| OSSL_PARAM::defn(c"x", ty).data_size;
+        assert_eq!(width(OSSL_PARAM::INTEGER), size_of::<core::ffi::c_int>());
+        assert_eq!(width(OSSL_PARAM::UNSIGNED_INTEGER), size_of::<usize>());
+        assert_eq!(width(OSSL_PARAM::REAL), size_of::<f64>());
+        assert_eq!(width(OSSL_PARAM::UTF8_STRING), 0);
+        assert_eq!(width(OSSL_PARAM::OCTET_STRING), 0);
+        assert_eq!(width(OSSL_PARAM::UTF8_PTR), 0);
     }
 
     #[test]
