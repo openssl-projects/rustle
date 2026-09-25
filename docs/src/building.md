@@ -54,8 +54,9 @@ The C formatting targets require clang-format; CI pins 22.1.8 for reproducible
 results. Set `CLANG_FORMAT` when that binary is installed under a versioned or
 non-standard name.
 
-C builds check that `pkg-config` can find `libcrypto` before compiling any C
-source, and stop with its diagnostic if discovery fails. Rust-only targets,
+OpenSSL 3.4 is the oldest supported libcrypto. C builds check that
+`pkg-config` finds a `libcrypto` at least that new before compiling any C
+source, and stop with its diagnostic otherwise. Rust-only targets,
 `help`, and `clean` do not require `pkg-config` or libcrypto.
 
 On macOS, the system `openssl` is LibreSSL and Homebrew keeps `openssl@3`
@@ -67,7 +68,8 @@ export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig"
 ```
 
 GitHub Actions checks formatting before testing on Ubuntu and macOS, on both
-x86_64 and arm64. CI jobs run only in `openssl-projects/rustle`; pull requests
+x86_64 and arm64. The Ubuntu jobs use 26.04, whose packaged OpenSSL meets the
+minimum; 24.04's does not. CI jobs run only in `openssl-projects/rustle`; pull requests
 from forks targeting upstream remain eligible to run there.
 
 To build and test against a configured OpenSSL build tree instead of the

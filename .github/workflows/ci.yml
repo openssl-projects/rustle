@@ -17,7 +17,7 @@ jobs:
   preflight:
     name: Formatting preflight
     if: github.repository == 'openssl-projects/rustle'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Check out rustle
@@ -64,9 +64,9 @@ jobs:
       matrix:
         include:
           - name: Ubuntu x86_64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
           - name: Ubuntu arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
           - name: macOS arm64
             runner: macos-15
           - name: macOS x86_64

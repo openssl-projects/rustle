@@ -1,6 +1,6 @@
 # Introduction
 
-`rustle` is a Rust workspace for building OpenSSL 3.x/4.x [loadable
+`rustle` is a Rust workspace for building OpenSSL 3.4+ [loadable
 providers](https://docs.openssl.org/master/man7/provider/) — dynamically
 loaded modules that supply cryptographic algorithm implementations to
 libcrypto.
